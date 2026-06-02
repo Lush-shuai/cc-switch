@@ -402,6 +402,14 @@ impl CodexAdapter {
         Self
     }
 
+    fn is_github_copilot(provider: &Provider) -> bool {
+        provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.provider_type.as_deref())
+            == Some("github_copilot")
+    }
+
     /// 检测是否为官方 Codex 客户端
     ///
     /// 匹配 User-Agent 模式: `^(codex_vscode|codex_cli_rs)/[\d.]+`
@@ -527,6 +535,10 @@ impl ProviderAdapter for CodexAdapter {
     }
 
     fn extract_auth(&self, provider: &Provider) -> Option<AuthInfo> {
+        if Self::is_github_copilot(provider) {
+            return Some(AuthInfo::new(String::new(), AuthStrategy::GitHubCopilot));
+        }
+
         self.extract_key(provider)
             .map(|key| AuthInfo::new(key, AuthStrategy::Bearer))
     }
@@ -567,12 +579,56 @@ impl ProviderAdapter for CodexAdapter {
         &self,
         auth: &AuthInfo,
     ) -> Result<Vec<(http::HeaderName, http::HeaderValue)>, ProxyError> {
-        use super::adapter::auth_header_value;
+        use super::adapter::auth_header_value as hv;
+        use http::{HeaderName, HeaderValue};
         let bearer = format!("Bearer {}", auth.api_key);
-        Ok(vec![(
-            http::HeaderName::from_static("authorization"),
-            auth_header_value(&bearer)?,
-        )])
+        Ok(match auth.strategy {
+            AuthStrategy::GitHubCopilot => {
+                let request_id = uuid::Uuid::new_v4().to_string();
+                vec![
+                    (HeaderName::from_static("authorization"), hv(&bearer)?),
+                    (
+                        HeaderName::from_static("editor-version"),
+                        HeaderValue::from_static(super::copilot_auth::COPILOT_EDITOR_VERSION),
+                    ),
+                    (
+                        HeaderName::from_static("editor-plugin-version"),
+                        HeaderValue::from_static(super::copilot_auth::COPILOT_PLUGIN_VERSION),
+                    ),
+                    (
+                        HeaderName::from_static("copilot-integration-id"),
+                        HeaderValue::from_static(super::copilot_auth::COPILOT_INTEGRATION_ID),
+                    ),
+                    (
+                        HeaderName::from_static("user-agent"),
+                        HeaderValue::from_static(super::copilot_auth::COPILOT_USER_AGENT),
+                    ),
+                    (
+                        HeaderName::from_static("x-github-api-version"),
+                        HeaderValue::from_static(super::copilot_auth::COPILOT_API_VERSION),
+                    ),
+                    (
+                        HeaderName::from_static("openai-intent"),
+                        HeaderValue::from_static("conversation-agent"),
+                    ),
+                    (
+                        HeaderName::from_static("x-initiator"),
+                        HeaderValue::from_static("user"),
+                    ),
+                    (
+                        HeaderName::from_static("x-interaction-type"),
+                        HeaderValue::from_static("conversation-agent"),
+                    ),
+                    (
+                        HeaderName::from_static("x-vscode-user-agent-library-version"),
+                        HeaderValue::from_static("electron-fetch"),
+                    ),
+                    (HeaderName::from_static("x-request-id"), hv(&request_id)?),
+                    (HeaderName::from_static("x-agent-task-id"), hv(&request_id)?),
+                ]
+            }
+            _ => vec![(HeaderName::from_static("authorization"), hv(&bearer)?)],
+        })
     }
 }
 
@@ -640,6 +696,40 @@ experimental_bearer_token = "sk-config-key"
         let auth = adapter.extract_auth(&provider).unwrap();
         assert_eq!(auth.api_key, "sk-config-key");
         assert_eq!(auth.strategy, AuthStrategy::Bearer);
+    }
+
+    #[test]
+    fn test_extract_auth_uses_github_copilot_strategy_for_managed_provider() {
+        let adapter = CodexAdapter::new();
+        let mut provider = create_provider(json!({
+            "auth": {
+                "OPENAI_API_KEY": ""
+            }
+        }));
+        provider.meta = Some(crate::provider::ProviderMeta {
+            provider_type: Some("github_copilot".to_string()),
+            ..Default::default()
+        });
+
+        let auth = adapter.extract_auth(&provider).unwrap();
+        assert_eq!(auth.strategy, AuthStrategy::GitHubCopilot);
+    }
+
+    #[test]
+    fn test_github_copilot_auth_headers_include_editor_version() {
+        let adapter = CodexAdapter::new();
+        let auth = AuthInfo::new("copilot-token".to_string(), AuthStrategy::GitHubCopilot);
+
+        let headers = adapter.get_auth_headers(&auth).unwrap();
+        let editor_version = headers
+            .iter()
+            .find(|(name, _)| name.as_str() == "editor-version")
+            .and_then(|(_, value)| value.to_str().ok());
+
+        assert_eq!(
+            editor_version,
+            Some(crate::proxy::providers::copilot_auth::COPILOT_EDITOR_VERSION)
+        );
     }
 
     #[test]

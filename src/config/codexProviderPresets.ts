@@ -31,6 +31,10 @@ export interface CodexProviderPreset {
   iconColor?: string; // 图标颜色
   // Codex API 格式
   apiFormat?: CodexApiFormat;
+  // 供应商类型标识（用于特殊供应商检测）
+  providerType?: "github_copilot" | "codex_oauth";
+  // 是否需要 OAuth 认证（而非 API Key）
+  requiresOAuth?: boolean;
   // Codex Chat 本地路由模式下的模型目录
   modelCatalog?: CodexCatalogModel[];
   // Codex Responses -> Chat Completions reasoning capability defaults
@@ -242,6 +246,23 @@ requires_openai_auth = true`,
     },
     icon: "azure",
     iconColor: "#0078D4",
+  },
+  {
+    name: "GitHub Copilot",
+    websiteUrl: "https://github.com/features/copilot",
+    category: "third_party",
+    auth: generateThirdPartyAuth(""),
+    config: generateThirdPartyConfig(
+      "GitHub Copilot",
+      "https://api.githubcopilot.com",
+      "gpt-5.4-codex",
+    ),
+    endpointCandidates: ["https://api.githubcopilot.com"],
+    apiFormat: "openai_responses",
+    providerType: "github_copilot",
+    requiresOAuth: true,
+    icon: "github",
+    iconColor: "#000000",
   },
   {
     name: "DeepSeek",

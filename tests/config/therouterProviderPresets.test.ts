@@ -49,6 +49,30 @@ describe("TheRouter provider presets", () => {
     expect(preset?.config).toContain('wire_api = "responses"');
   });
 
+  it("adds GitHub Copilot as a managed Codex provider", () => {
+    const preset = codexProviderPresets.find(
+      (item) => item.name === "GitHub Copilot",
+    );
+
+    expect(preset).toBeDefined();
+    expect(preset?.websiteUrl).toBe("https://github.com/features/copilot");
+    expect(preset?.category).toBe("third_party");
+    expect(preset?.auth).toEqual({ OPENAI_API_KEY: "" });
+    expect(preset?.endpointCandidates).toEqual([
+      "https://api.githubcopilot.com",
+    ]);
+    expect(preset?.apiFormat).toBe("openai_responses");
+    expect(preset?.providerType).toBe("github_copilot");
+    expect(preset?.requiresOAuth).toBe(true);
+    expect(preset?.config).toContain('model_provider = "custom"');
+    expect(preset?.config).toContain('model = "gpt-5.4-codex"');
+    expect(preset?.config).toContain(
+      'base_url = "https://api.githubcopilot.com"',
+    );
+    expect(preset?.config).toContain('wire_api = "responses"');
+    expect(preset?.config).toContain("requires_openai_auth = true");
+  });
+
   it("uses the Gemini-native root endpoint for Gemini", () => {
     const preset = geminiProviderPresets.find(
       (item) => item.name === "TheRouter",

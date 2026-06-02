@@ -59,7 +59,7 @@ mod tests {
     use crate::claude_desktop_config::PROFILE_ID;
     use crate::config::{get_claude_settings_path, read_json_file, write_json_file};
     use crate::database::Database;
-    use crate::provider::ProviderMeta;
+    use crate::provider::{AuthBinding, AuthBindingSource, ProviderMeta};
     #[cfg(any(target_os = "macos", windows))]
     use crate::provider::{ClaudeDesktopMode, ClaudeDesktopModelRoute};
     use crate::proxy::types::ProxyConfig;
@@ -274,6 +274,150 @@ mod tests {
             icon_color: None,
             in_failover_queue: false,
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn switching_codex_copilot_provider_enables_proxy_takeover() {
+        let _home = TempHome::new();
+        crate::settings::reload_settings().expect("reload settings");
+
+        let db = Arc::new(Database::memory().expect("init db"));
+        let state = AppState::new(db.clone());
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+        let proxy_port = listener.local_addr().expect("local address").port();
+        drop(listener);
+        db.update_proxy_config(ProxyConfig {
+            listen_port: proxy_port,
+            ..Default::default()
+        })
+        .await
+        .expect("use ephemeral proxy port");
+
+        let normal = Provider::with_id(
+            "normal".into(),
+            "Normal".into(),
+            json!({
+                "auth": {
+                    "OPENAI_API_KEY": "normal-token"
+                },
+                "config": r#"model_provider = "normal"
+model = "gpt-5.5"
+
+[model_providers.normal]
+name = "Normal"
+base_url = "https://normal.example/v1"
+wire_api = "responses"
+requires_openai_auth = true
+"#
+            }),
+            None,
+        );
+        let mut copilot = Provider::with_id(
+            "copilot".into(),
+            "GitHub Copilot".into(),
+            json!({
+                "auth": {
+                    "OPENAI_API_KEY": ""
+                },
+                "config": r#"model_provider = "custom"
+model = "gpt-5.4-codex"
+
+[model_providers.custom]
+name = "GitHub Copilot"
+base_url = "https://api.githubcopilot.com"
+wire_api = "responses"
+requires_openai_auth = true
+"#
+            }),
+            None,
+        );
+        copilot.meta = Some(ProviderMeta {
+            provider_type: Some("github_copilot".to_string()),
+            auth_binding: Some(AuthBinding {
+                source: AuthBindingSource::ManagedAccount,
+                auth_provider: Some("github_copilot".to_string()),
+                account_id: Some("account-1".to_string()),
+            }),
+            ..ProviderMeta::default()
+        });
+
+        db.save_provider("codex", &normal).expect("save normal");
+        db.save_provider("codex", &copilot).expect("save copilot");
+        db.set_current_provider("codex", "normal")
+            .expect("set db current");
+        crate::settings::set_current_provider(&AppType::Codex, Some("normal"))
+            .expect("set local current");
+
+        crate::codex_config::write_codex_live_atomic(
+            normal
+                .settings_config
+                .get("auth")
+                .expect("normal auth exists"),
+            normal
+                .settings_config
+                .get("config")
+                .and_then(|value| value.as_str()),
+        )
+        .expect("seed codex live config");
+
+        ProviderService::switch(&state, AppType::Codex, "copilot")
+            .expect("switch to codex copilot");
+        state.proxy_service.stop().await.expect("stop proxy server");
+
+        assert_eq!(
+            crate::settings::get_current_provider(&AppType::Codex).as_deref(),
+            Some("copilot")
+        );
+        assert_eq!(
+            db.get_current_provider("codex")
+                .expect("get db current")
+                .as_deref(),
+            Some("copilot")
+        );
+        assert!(
+            db.get_proxy_config_for_app("codex")
+                .await
+                .expect("get codex proxy config")
+                .enabled,
+            "Codex proxy takeover should be enabled for GitHub Copilot"
+        );
+
+        let live_auth: Value =
+            crate::config::read_json_file(&crate::codex_config::get_codex_auth_path())
+                .expect("read codex auth");
+        assert_eq!(
+            live_auth
+                .get("OPENAI_API_KEY")
+                .and_then(|value| value.as_str()),
+            Some("PROXY_MANAGED")
+        );
+
+        let live_config = crate::codex_config::read_codex_config_text().expect("read codex config");
+        assert!(
+            live_config.contains(&format!("http://127.0.0.1:{proxy_port}/v1")),
+            "Codex live config should point at the local proxy"
+        );
+        assert!(
+            !live_config.contains("https://api.githubcopilot.com"),
+            "Copilot upstream should stay behind the proxy, not in Codex live config"
+        );
+
+        let backup = db
+            .get_live_backup("codex")
+            .await
+            .expect("get codex backup")
+            .expect("backup exists");
+        let backup_value: Value =
+            serde_json::from_str(&backup.original_config).expect("parse backup");
+        assert_eq!(
+            backup_value
+                .get("auth")
+                .and_then(|auth| auth.get("OPENAI_API_KEY"))
+                .and_then(|value| value.as_str()),
+            Some("normal-token"),
+            "the original live config should remain restorable"
+        );
     }
 
     fn omo_config_path(home: &Path, category: &str) -> PathBuf {
@@ -1620,6 +1764,10 @@ impl ProviderService {
 
         let should_hot_switch = is_app_taken_over || live_taken_over;
 
+        if matches!(app_type, AppType::Codex) && _provider.is_github_copilot() {
+            return Self::switch_codex_managed_proxy_provider(state, id, &providers);
+        }
+
         // Block switching to official providers when proxy takeover is active.
         // Using a proxy with official APIs (Anthropic/OpenAI/Google) may cause account bans.
         if should_hot_switch && _provider.category.as_deref() == Some("official") {
@@ -1654,6 +1802,58 @@ impl ProviderService {
 
         // Normal mode: full switch with Live config write
         Self::switch_normal(state, app_type, id, &providers)
+    }
+
+    fn switch_codex_managed_proxy_provider(
+        state: &AppState,
+        id: &str,
+        providers: &indexmap::IndexMap<String, Provider>,
+    ) -> Result<SwitchResult, AppError> {
+        let app_type = AppType::Codex;
+        let provider = providers
+            .get(id)
+            .ok_or_else(|| AppError::Message(format!("供应商 {id} 不存在")))?;
+        let mut result = SwitchResult::default();
+
+        let current_id = crate::settings::get_effective_current_provider(&state.db, &app_type)?;
+        if let Some(current_id) = current_id {
+            if current_id != id {
+                if let Ok(live_config) = read_live_settings(app_type.clone()) {
+                    if let Some(mut current_provider) = providers.get(&current_id).cloned() {
+                        current_provider.settings_config = strip_common_config_from_live_settings(
+                            state.db.as_ref(),
+                            &app_type,
+                            &current_provider,
+                            live_config,
+                        );
+                        if let Err(e) = state.db.save_provider(app_type.as_str(), &current_provider)
+                        {
+                            log::warn!("Backfill failed: {e}");
+                            result
+                                .warnings
+                                .push(format!("backfill_failed:{current_id}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        futures::executor::block_on(state.proxy_service.ensure_takeover_for_app(&app_type))
+            .map_err(|e| AppError::Message(format!("启用 Codex 本地代理接管失败: {e}")))?;
+
+        crate::settings::set_current_provider(&app_type, Some(id))?;
+        state.db.set_current_provider(app_type.as_str(), id)?;
+
+        futures::executor::block_on(
+            state
+                .proxy_service
+                .hot_switch_provider_inner(app_type.as_str(), &provider.id),
+        )
+        .map_err(|e| AppError::Message(format!("切换 Codex 代理目标失败: {e}")))?;
+
+        McpService::sync_all_enabled(state)?;
+
+        Ok(result)
     }
 
     /// Normal switch flow (non-proxy mode)
