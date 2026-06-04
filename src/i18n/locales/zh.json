@@ -1997,6 +1997,10 @@
     "search": "搜索技能",
     "searchPlaceholder": "搜索技能名称或仓库名称...",
     "installedSearchPlaceholder": "搜索已安装技能...",
+    "selectAll": "全选",
+    "deselectAll": "取消全选",
+    "selectAllForApp": "为 {{app}} 全选当前筛选技能",
+    "deselectAllForApp": "为 {{app}} 取消当前筛选技能",
     "searchSource": {
       "repos": "仓库",
       "skillssh": "skills.sh"

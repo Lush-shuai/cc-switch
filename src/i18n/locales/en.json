@@ -1997,6 +1997,10 @@
     "search": "Search Skills",
     "searchPlaceholder": "Search skill name or repo...",
     "installedSearchPlaceholder": "Search installed skills...",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all",
+    "selectAllForApp": "Select all filtered skills for {{app}}",
+    "deselectAllForApp": "Deselect all filtered skills for {{app}}",
     "searchSource": {
       "repos": "Repos",
       "skillssh": "skills.sh"

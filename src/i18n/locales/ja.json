@@ -1997,6 +1997,10 @@
     "search": "スキルを検索",
     "searchPlaceholder": "スキル名またはリポジトリで検索...",
     "installedSearchPlaceholder": "インストール済みスキルを検索...",
+    "selectAll": "すべて選択",
+    "deselectAll": "すべて解除",
+    "selectAllForApp": "{{app}} の絞り込み済みスキルをすべて選択",
+    "deselectAllForApp": "{{app}} の絞り込み済みスキルをすべて解除",
     "searchSource": {
       "repos": "リポジトリ",
       "skillssh": "skills.sh"

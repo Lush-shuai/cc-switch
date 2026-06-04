@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Check,
   Sparkles,
   Trash2,
   ExternalLink,
   RefreshCw,
   Loader2,
   Search,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +42,7 @@ import type { AppId } from "@/lib/api/types";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { settingsApi, skillsApi } from "@/lib/api";
 import { toast } from "sonner";
-import { SKILLS_APP_IDS } from "@/config/appConfig";
+import { APP_ICON_MAP, SKILLS_APP_IDS } from "@/config/appConfig";
 import { AppCountBar } from "@/components/common/AppCountBar";
 import { AppToggleGroup } from "@/components/common/AppToggleGroup";
 import { ListItemRow } from "@/components/common/ListItemRow";
@@ -204,6 +206,26 @@ const UnifiedSkillsPanel = React.forwardRef<
   const handleToggleApp = async (id: string, app: AppId, enabled: boolean) => {
     try {
       await toggleAppMutation.mutateAsync({ id, app, enabled });
+    } catch (error) {
+      toast.error(t("common.error"), { description: String(error) });
+    }
+  };
+
+  const handleBulkToggleCurrentApp = async (enabled: boolean) => {
+    if (!SKILLS_APP_IDS.includes(currentApp)) return;
+
+    const targetSkills = enabled
+      ? filteredSkills.filter((skill) => !skill.apps[currentApp])
+      : filteredSkills;
+
+    try {
+      for (const skill of targetSkills) {
+        await toggleAppMutation.mutateAsync({
+          id: skill.id,
+          app: currentApp,
+          enabled,
+        });
+      }
     } catch (error) {
       toast.error(t("common.error"), { description: String(error) });
     }
@@ -498,6 +520,38 @@ const UnifiedSkillsPanel = React.forwardRef<
               ))}
             </SelectContent>
           </Select>
+          {SKILLS_APP_IDS.includes(currentApp) && (
+            <div className="flex items-center gap-2 sm:flex-shrink-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5"
+                onClick={() => handleBulkToggleCurrentApp(true)}
+                disabled={filteredSkills.length === 0}
+                title={t("skills.selectAllForApp", {
+                  app: APP_ICON_MAP[currentApp].label,
+                })}
+              >
+                <Check size={14} />
+                {t("skills.selectAll")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5"
+                onClick={() => handleBulkToggleCurrentApp(false)}
+                disabled={filteredSkills.length === 0}
+                title={t("skills.deselectAllForApp", {
+                  app: APP_ICON_MAP[currentApp].label,
+                })}
+              >
+                <X size={14} />
+                {t("skills.deselectAll")}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

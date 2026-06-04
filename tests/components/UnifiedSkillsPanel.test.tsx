@@ -211,4 +211,100 @@ describe("UnifiedSkillsPanel", () => {
     expect(screen.queryByText("Browser Control")).not.toBeInTheDocument();
     expect(screen.getByText("Lark Calendar")).toBeInTheDocument();
   });
+
+  it("bulk toggles the current app for filtered installed skills", async () => {
+    installedSkillsMock = [
+      {
+        id: "1",
+        name: "Browser Control",
+        description: "Open and inspect browser pages",
+        directory: "browser-control",
+        repoOwner: "openai",
+        repoName: "browser-tools",
+        apps: {
+          claude: false,
+          codex: false,
+          gemini: false,
+          opencode: false,
+          openclaw: false,
+          hermes: false,
+        },
+        installedAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "2",
+        name: "Lark Calendar",
+        description: "Manage meetings",
+        directory: "lark-calendar",
+        repoOwner: "lark",
+        repoName: "workflows",
+        apps: {
+          claude: false,
+          codex: false,
+          gemini: false,
+          opencode: false,
+          openclaw: false,
+          hermes: false,
+        },
+        installedAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "3",
+        name: "Browser Audit",
+        description: "Check browser pages",
+        directory: "browser-audit",
+        repoOwner: "openai",
+        repoName: "browser-tools",
+        apps: {
+          claude: true,
+          codex: false,
+          gemini: false,
+          opencode: false,
+          openclaw: false,
+          hermes: false,
+        },
+        installedAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    const user = userEvent.setup();
+
+    render(
+      <UnifiedSkillsPanel
+        onOpenDiscovery={() => {}}
+        currentApp="claude"
+      />,
+    );
+
+    await user.type(
+      screen.getByPlaceholderText("skills.installedSearchPlaceholder"),
+      "browser",
+    );
+    await user.click(screen.getByRole("button", { name: "skills.selectAll" }));
+
+    expect(toggleSkillAppMock).toHaveBeenCalledTimes(1);
+    expect(toggleSkillAppMock).toHaveBeenCalledWith({
+      id: "1",
+      app: "claude",
+      enabled: true,
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: "skills.deselectAll" }),
+    );
+
+    expect(toggleSkillAppMock).toHaveBeenCalledTimes(3);
+    expect(toggleSkillAppMock).toHaveBeenNthCalledWith(2, {
+      id: "1",
+      app: "claude",
+      enabled: false,
+    });
+    expect(toggleSkillAppMock).toHaveBeenNthCalledWith(3, {
+      id: "3",
+      app: "claude",
+      enabled: false,
+    });
+  });
 });
