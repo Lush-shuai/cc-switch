@@ -1992,6 +1992,7 @@
     },
     "search": "スキルを検索",
     "searchPlaceholder": "スキル名またはリポジトリで検索...",
+    "installedSearchPlaceholder": "インストール済みスキルを検索...",
     "searchSource": {
       "repos": "リポジトリ",
       "skillssh": "skills.sh"

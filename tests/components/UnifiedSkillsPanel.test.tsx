@@ -1,5 +1,6 @@
 import { createRef } from "react";
 import { render, screen, waitFor, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import UnifiedSkillsPanel, {
@@ -13,6 +14,24 @@ const importSkillsMock = vi.fn();
 const installFromZipMock = vi.fn();
 const deleteSkillBackupMock = vi.fn();
 const restoreSkillBackupMock = vi.fn();
+let installedSkillsMock: Array<{
+  id: string;
+  name: string;
+  description?: string;
+  directory: string;
+  repoOwner?: string;
+  repoName?: string;
+  apps: {
+    claude: boolean;
+    codex: boolean;
+    gemini: boolean;
+    opencode: boolean;
+    openclaw: boolean;
+    hermes: boolean;
+  };
+  installedAt: number;
+  updatedAt: number;
+}> = [];
 
 vi.mock("sonner", () => ({
   toast: {
@@ -22,9 +41,17 @@ vi.mock("sonner", () => ({
   },
 }));
 
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = vi.fn();
+}
+
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+}
+
 vi.mock("@/hooks/useSkills", () => ({
   useInstalledSkills: () => ({
-    data: [],
+    data: installedSkillsMock,
     isLoading: false,
   }),
   useSkillBackups: () => ({
@@ -77,6 +104,7 @@ vi.mock("@/hooks/useSkills", () => ({
 
 describe("UnifiedSkillsPanel", () => {
   beforeEach(() => {
+    installedSkillsMock = [];
     scanUnmanagedMock.mockResolvedValue({
       data: [
         {
@@ -116,5 +144,71 @@ describe("UnifiedSkillsPanel", () => {
       expect(screen.getByText("Shared Skill")).toBeInTheDocument();
       expect(screen.getByText("/tmp/shared-skill")).toBeInTheDocument();
     });
+  });
+
+  it("filters installed skills by search query and repo group", async () => {
+    installedSkillsMock = [
+      {
+        id: "1",
+        name: "Browser Control",
+        description: "Open and inspect browser pages",
+        directory: "browser-control",
+        repoOwner: "openai",
+        repoName: "browser-tools",
+        apps: {
+          claude: true,
+          codex: false,
+          gemini: false,
+          opencode: false,
+          openclaw: false,
+          hermes: false,
+        },
+        installedAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "2",
+        name: "Lark Calendar",
+        description: "Manage meetings",
+        directory: "lark-calendar",
+        repoOwner: "lark",
+        repoName: "workflows",
+        apps: {
+          claude: false,
+          codex: true,
+          gemini: false,
+          opencode: false,
+          openclaw: false,
+          hermes: false,
+        },
+        installedAt: 1,
+        updatedAt: 1,
+      },
+    ];
+    const user = userEvent.setup();
+
+    render(
+      <UnifiedSkillsPanel
+        onOpenDiscovery={() => {}}
+        currentApp="claude"
+      />,
+    );
+
+    await user.type(
+      screen.getByPlaceholderText("skills.installedSearchPlaceholder"),
+      "browser",
+    );
+
+    expect(screen.getByText("Browser Control")).toBeInTheDocument();
+    expect(screen.queryByText("Lark Calendar")).not.toBeInTheDocument();
+
+    await user.clear(
+      screen.getByPlaceholderText("skills.installedSearchPlaceholder"),
+    );
+    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getAllByText("lark/workflows").at(-1)!);
+
+    expect(screen.queryByText("Browser Control")).not.toBeInTheDocument();
+    expect(screen.getByText("Lark Calendar")).toBeInTheDocument();
   });
 });

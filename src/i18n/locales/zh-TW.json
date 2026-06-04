@@ -1938,6 +1938,7 @@
     },
     "search": "搜尋技能",
     "searchPlaceholder": "搜尋技能名稱或儲存庫名稱...",
+    "installedSearchPlaceholder": "搜尋已安裝技能...",
     "searchSource": {
       "repos": "儲存庫",
       "skillssh": "skills.sh"

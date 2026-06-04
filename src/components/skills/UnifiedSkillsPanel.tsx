@@ -6,9 +6,18 @@ import {
   ExternalLink,
   RefreshCw,
   Loader2,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import {
   type ImportSkillSelection,
@@ -64,6 +73,23 @@ function formatSkillBackupDate(unixSeconds: number): string {
     : date.toLocaleString();
 }
 
+function getSkillSourceKey(skill: InstalledSkill): string {
+  if (skill.repoOwner && skill.repoName) {
+    return `${skill.repoOwner}/${skill.repoName}`;
+  }
+  return "__local__";
+}
+
+function getSkillSourceLabel(
+  skill: InstalledSkill,
+  t: ReturnType<typeof useTranslation>["t"],
+): string {
+  if (skill.repoOwner && skill.repoName) {
+    return `${skill.repoOwner}/${skill.repoName}`;
+  }
+  return t("skills.local");
+}
+
 const UnifiedSkillsPanel = React.forwardRef<
   UnifiedSkillsPanelHandle,
   UnifiedSkillsPanelProps
@@ -79,6 +105,8 @@ const UnifiedSkillsPanel = React.forwardRef<
   } | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [restoreDialogOpen, setRestoreDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("__all__");
 
   const { data: skills, isLoading } = useInstalledSkills();
   const {
@@ -130,6 +158,48 @@ const UnifiedSkillsPanel = React.forwardRef<
     });
     return counts;
   }, [skills]);
+
+  const sourceOptions = useMemo(() => {
+    const options = new Map<string, { label: string; count: number }>();
+    for (const skill of skills ?? []) {
+      const key = getSkillSourceKey(skill);
+      const existing = options.get(key);
+      options.set(key, {
+        label: existing?.label ?? getSkillSourceLabel(skill, t),
+        count: (existing?.count ?? 0) + 1,
+      });
+    }
+    return Array.from(options, ([key, value]) => ({ key, ...value })).sort(
+      (a, b) => a.label.localeCompare(b.label),
+    );
+  }, [skills, t]);
+
+  const filteredSkills = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return (skills ?? []).filter((skill) => {
+      if (
+        sourceFilter !== "__all__" &&
+        getSkillSourceKey(skill) !== sourceFilter
+      ) {
+        return false;
+      }
+
+      if (!normalizedQuery) return true;
+
+      const sourceLabel = getSkillSourceLabel(skill, t);
+      return [
+        skill.name,
+        skill.description,
+        skill.directory,
+        skill.repoOwner,
+        skill.repoName,
+        skill.repoBranch,
+        sourceLabel,
+      ]
+        .filter(Boolean)
+        .some((value) => value!.toLowerCase().includes(normalizedQuery));
+    });
+  }, [searchQuery, skills, sourceFilter, t]);
 
   const handleToggleApp = async (id: string, app: AppId, enabled: boolean) => {
     try {
@@ -399,6 +469,38 @@ const UnifiedSkillsPanel = React.forwardRef<
         </div>
       </div>
 
+      {!isLoading && skills && skills.length > 0 && (
+        <div className="flex flex-col sm:flex-row gap-2 mb-3">
+          <div className="relative flex-1 min-w-0">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder={t("skills.installedSearchPlaceholder")}
+              className="h-9 pl-8"
+            />
+          </div>
+          <Select value={sourceFilter} onValueChange={setSourceFilter}>
+            <SelectTrigger className="h-9 sm:w-56">
+              <SelectValue placeholder={t("skills.filter.repo")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">
+                {t("skills.filter.allRepos")}
+              </SelectItem>
+              {sourceOptions.map((option) => (
+                <SelectItem key={option.key} value={option.key}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto overflow-x-hidden pb-24">
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">
@@ -418,22 +520,30 @@ const UnifiedSkillsPanel = React.forwardRef<
           </div>
         ) : (
           <TooltipProvider delayDuration={300}>
-            <div className="rounded-xl border border-border-default overflow-hidden">
-              {skills.map((skill, index) => (
-                <InstalledSkillListItem
-                  key={skill.id}
-                  skill={skill}
-                  hasUpdate={!!updatesMap[skill.id]}
-                  isUpdating={
-                    updateSkillMutation.isPending &&
-                    updateSkillMutation.variables === skill.id
-                  }
-                  onToggleApp={handleToggleApp}
-                  onUninstall={() => handleUninstall(skill)}
-                  onUpdate={() => handleUpdateSkill(skill)}
-                  isLast={index === skills.length - 1}
-                />
-              ))}
+            <div className="space-y-3">
+              {filteredSkills.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground text-sm">
+                  {t("skills.noResults")}
+                </div>
+              ) : (
+                <div className="rounded-xl border border-border-default overflow-hidden">
+                  {filteredSkills.map((skill, index) => (
+                    <InstalledSkillListItem
+                      key={skill.id}
+                      skill={skill}
+                      hasUpdate={!!updatesMap[skill.id]}
+                      isUpdating={
+                        updateSkillMutation.isPending &&
+                        updateSkillMutation.variables === skill.id
+                      }
+                      onToggleApp={handleToggleApp}
+                      onUninstall={() => handleUninstall(skill)}
+                      onUpdate={() => handleUpdateSkill(skill)}
+                      isLast={index === filteredSkills.length - 1}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </TooltipProvider>
         )}
@@ -508,11 +618,8 @@ const InstalledSkillListItem: React.FC<InstalledSkillListItemProps> = ({
   };
 
   const sourceLabel = useMemo(() => {
-    if (skill.repoOwner && skill.repoName) {
-      return `${skill.repoOwner}/${skill.repoName}`;
-    }
-    return t("skills.local");
-  }, [skill.repoOwner, skill.repoName, t]);
+    return getSkillSourceLabel(skill, t);
+  }, [skill, t]);
 
   return (
     <ListItemRow isLast={isLast}>

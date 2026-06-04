@@ -1992,6 +1992,7 @@
     },
     "search": "搜索技能",
     "searchPlaceholder": "搜索技能名称或仓库名称...",
+    "installedSearchPlaceholder": "搜索已安装技能...",
     "searchSource": {
       "repos": "仓库",
       "skillssh": "skills.sh"
